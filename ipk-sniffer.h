@@ -57,4 +57,6 @@ int print_interfaces();
  */
 int sniff(Params &params);
 
+void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packet);
+
 #endif //FIT_IPK_2_IPK_SNIFFER_H

@@ -16,6 +16,7 @@
 #include <net/if.h>
 #include <netdb.h>
 #include <netinet/if_ether.h>
+#include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 #include <netinet/tcp.h>
@@ -50,7 +51,6 @@ int main(int argc, char** argv){
 
     if(sniff(par) == ERR)
         return EXIT_FAILURE;
-
 
     return EXIT_SUCCESS;
 
@@ -178,22 +178,9 @@ int print_interfaces(){
 int sniff(Params &params){
 
     pcap_t* pcap_handle;  //!< packet capture handle
-    bpf_program fp;
-    bpf_u_int32 netmask;
-    char filter[] = "tcp port 80";
-
-//    // vytvoreni popisovace
-//    if ((pcap_handle = pcap_create(params.interface, nullptr)) == NULL){
-//        cerr << "error occurred while creating packet capture handle" << endl;
-//        return ERR;
-//    }
-//
-//    // aktivace
-//    if(pcap_activate(pcap_handle) < 0){
-//        cerr << "error occurred while activating packet capture handle" << endl;
-//        pcap_close(pcap_handle);
-//        return ERR;
-//    }
+    bpf_program fp{};
+    bpf_u_int32 netmask = 0;
+    char filter[] = "tcp or udp port 80";
 
     //otevreni zarizeni pro zachytavani
     if((pcap_handle = pcap_open_live(params.interface,BUFSIZ,1,1000, nullptr)) == nullptr){
@@ -201,13 +188,21 @@ int sniff(Params &params){
         return ERR;
     }
 
+    // zpracovani a overeni filteru
     if(pcap_compile(pcap_handle, &fp, filter, 0, netmask) == PCAP_ERROR){
         cerr << "Couldn't parse filter: " << filter << endl;
         return ERR;
     }
 
+    // nastaveni filteru
     if(pcap_setfilter(pcap_handle, &fp) == PCAP_ERROR){
         cerr << "Couldn't set filter: " << filter << endl;
+        return ERR;
+    }
+
+    // zachytavani paketu
+    if(pcap_loop(pcap_handle, params.num, process_packet, nullptr) != 0){
+        cerr << "error occured while sniffing packet" << endl;
         return ERR;
     }
 
@@ -215,4 +210,17 @@ int sniff(Params &params){
     pcap_close(pcap_handle);
 
     return SUCC;
+}
+
+void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packet){
+//    //eth_header = (ether_header*) packet;
+    for(int i=0;i<header->len;i++) {
+        if(isprint(packet[i]))                /* Check if the packet data is printable */
+            printf("%c ",packet[i]);          /* Print it */
+        else
+            printf(" . ");          /* If not print a . */
+
+        if((i%16==0 && i!=0) || i==header->len-1)
+            printf("\n");
+    }
 }
