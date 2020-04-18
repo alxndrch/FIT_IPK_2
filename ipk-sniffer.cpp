@@ -180,7 +180,7 @@ int sniff(Params &params){
     pcap_t* pcap_handle;  //!< packet capture handle
     bpf_program fp{};
     bpf_u_int32 netmask = 0;
-    char filter[] = "tcp or udp port 80";
+    char filter[] = "tcp port 80";
 
     //otevreni zarizeni pro zachytavani
     if((pcap_handle = pcap_open_live(params.interface,BUFSIZ,1,1000, nullptr)) == nullptr){
@@ -213,14 +213,41 @@ int sniff(Params &params){
 }
 
 void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packet){
-//    //eth_header = (ether_header*) packet;
-    for(int i=0;i<header->len;i++) {
-        if(isprint(packet[i]))                /* Check if the packet data is printable */
-            printf("%c ",packet[i]);          /* Print it */
-        else
-            printf(" . ");          /* If not print a . */
 
-        if((i%16==0 && i!=0) || i==header->len-1)
-            printf("\n");
+    vector<char> hex_dump;
+
+    for(int i = 0, y = 1, offset = 0; i < header->len; i++,y++) {
+
+        printf("%02x ",packet[i]);
+        if(y == 8){
+            cout << " ";
+            y = 0;
+        }
+
+        hex_dump.push_back(packet[i]);
+
+        if((i%((offset+1)*15+offset)==0 && i!=0) || i == header->len-1){
+
+            // zarovnani acii znaku do bloku
+            if(i == header->len-1){
+                    // komenzace znaku mezerami
+                    for(int z = i%16; z != 15; z++){
+                        cout << "   "; // za kazdy chybejici znak
+                    }
+                    if(i%16 < 8) cout << " "; // mezera za hexa vypisem
+                    cout << " "; // komepenzace prostedni mezery u hexa vypisu
+            }
+
+            for(char & it : hex_dump){
+                if(isprint(it)) cout << it;
+                else cout << "." ;
+            }
+
+            hex_dump.clear();
+            cout << endl;
+            offset++;
+        }
     }
+    // konec radku za paketem
+    cout << endl;
 }
