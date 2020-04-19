@@ -10,9 +10,11 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <getopt.h>
 #include <ifaddrs.h>
 #include <iostream>
+#include <linux/if_ether.h>
 #include <net/if.h>
 #include <netdb.h>
 #include <netinet/if_ether.h>
@@ -180,7 +182,12 @@ int sniff(Params &params){
     pcap_t* pcap_handle;  //!< packet capture handle
     bpf_program fp{};
     bpf_u_int32 netmask = 0;
-    char filter[] = "tcp port 80";
+    string s = set_filter_str(params); //"tcp or udp port 80";
+
+    // prevod string na char*
+    char filter[s.size() + 1];
+    s.copy(filter, s.size() + 1);
+    filter[s.size()] = '\0';
 
     //otevreni zarizeni pro zachytavani
     if((pcap_handle = pcap_open_live(params.interface,BUFSIZ,1,1000, nullptr)) == nullptr){
@@ -214,9 +221,70 @@ int sniff(Params &params){
 
 void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packet){
 
-    vector<char> hex_dump;
+    vector<char> hex_dump;  //!< hexadecimalni obsah paketu
+    const tm *p_time = localtime(&header->ts.tv_sec);  //!< cas paketu
+    char timestr[16];  //!< cas paketu v retezci
 
-    for(int i = 0, y = 1, offset = 0; i < header->len; i++,y++) {
+    udphdr *udp_h{};  //!< hlavicka UDP
+    tcphdr *tcp_h{};  //!< hlavicka TCP
+    ip *ip4_h{};  //!< hlavicka IPv4 datagramu
+    ip6_hdr *ip6_h{};  //!< hlavicka IPv6 datagramu
+    ether_header* eth_h{};  //!< hlavicka ethernetoveho ramce
+
+    u_int16_t dport = 0;  //!< cilovy port
+    u_int16_t sport = 0;  //!< zdrojovy port
+
+    char* dest;  //!< cilova adresa
+    char* src;  //!< zrojova adresa
+
+    strftime(timestr, sizeof(timestr),"%H:%M:%S",p_time);
+
+    eth_h = (ether_header*) (packet);
+
+    if(ntohs(eth_h->ether_type) == ETHERTYPE_IPV6){
+        ip6_h = (ip6_hdr*) (packet + ETH_HLEN);
+
+        dest = (char*) malloc(40);
+        src = (char*) malloc(40);
+        inet_ntop(AF_INET6, &ip6_h->ip6_src, src,39);
+        inet_ntop(AF_INET6, &ip6_h->ip6_dst, dest,39);
+
+        if(ip6_h->ip6_ctlun.ip6_un1.ip6_un1_nxt == IPPROTO_TCP){
+            tcp_h = (tcphdr*) (packet + ETH_HLEN + 40);
+            sport = ntohs(tcp_h->th_sport);
+            dport = ntohs(tcp_h->th_dport);
+        }else if(ip6_h->ip6_ctlun.ip6_un1.ip6_un1_nxt == IPPROTO_UDP){
+            udp_h = (udphdr*) (packet + ETH_HLEN + 40);
+            sport = ntohs(udp_h->uh_sport);
+            dport = ntohs(udp_h->uh_dport);
+        }
+
+        printf("%s.%03ld ", timestr, header->ts.tv_usec);
+        cout << src << " : " << sport << " > " << dest << " : " << dport << endl;
+
+    }else if(ntohs(eth_h->ether_type) == ETHERTYPE_IP){
+        ip4_h = (ip*) (packet + ETH_HLEN);
+        if(ip4_h->ip_p == IPPROTO_TCP){
+            tcp_h = (tcphdr*) (packet + ETH_HLEN + ip4_h->ip_hl*4);
+            sport = ntohs(tcp_h->th_sport);
+            dport = ntohs(tcp_h->th_dport);
+        }else if(ip4_h->ip_p == IPPROTO_UDP){
+            udp_h = (udphdr*) (packet + ETH_HLEN + ip4_h->ip_hl*4);
+            sport = ntohs(udp_h->uh_sport);
+            dport = ntohs(udp_h->uh_dport);
+        }
+
+        printf("%s.%03ld ", timestr, header->ts.tv_usec);
+        cout << inet_ntoa(ip4_h->ip_src) << " : " << sport << " > " << inet_ntoa(ip4_h->ip_dst) << " : " << dport << endl;
+
+    }
+
+    for(int i = 0, y = 1, w = 0, q = 0, offset = 0; i < header->len; i++,y++, q++) {
+
+        if(q == 0){
+            printf("0x%04x: ",i);
+
+        }
 
         printf("%02x ",packet[i]);
         if(y == 8){
@@ -238,11 +306,17 @@ void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packe
                     cout << " "; // komepenzace prostedni mezery u hexa vypisu
             }
 
+            // vypis ascii
+            w = 0;
             for(char & it : hex_dump){
+                if(w++ == 8){ // mezera mezi ascii
+                    cout << " ";
+                }
+
                 if(isprint(it)) cout << it;
                 else cout << "." ;
             }
-
+            q = -1;
             hex_dump.clear();
             cout << endl;
             offset++;
@@ -250,4 +324,27 @@ void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packe
     }
     // konec radku za paketem
     cout << endl;
+
+}
+
+string set_filter_str(Params &params){
+
+    string port = to_string(params.port);
+    string protocol;
+
+    if(params.tcp && !params.udp)
+        protocol = "tcp";
+    else if(!params.tcp && params.udp)
+        protocol = "udp";
+    else
+        protocol = "tcp or udp";
+
+    if(params.port == -1){
+        return protocol;
+    }
+
+    string filter = protocol + " port " + port;
+
+    return filter;
+
 }

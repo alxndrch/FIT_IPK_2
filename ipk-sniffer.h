@@ -57,6 +57,22 @@ int print_interfaces();
  */
 int sniff(Params &params);
 
+
+/**
+ * @brief zpracovani paktu a vypis informaci
+ *
+ * @param user
+ * @param header
+ * @param packet paket
+ */
 void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packet);
+
+/**
+ * @brief nastaveni filteru pro port o protokol
+ *
+ * @param params parametry
+ * @return retezec ve formatu "<protokol> port <cislo portu>"
+ */
+std::string set_filter_str(Params &params);
 
 #endif //FIT_IPK_2_IPK_SNIFFER_H
