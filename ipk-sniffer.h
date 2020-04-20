@@ -75,4 +75,8 @@ void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packe
  */
 std::string set_filter_str(Params &params);
 
+int alloc_strs(char** src, char** dest, int len);
+
+void clean_strs(char** src, char** dest);
+
 #endif //FIT_IPK_2_IPK_SNIFFER_H
