@@ -79,4 +79,6 @@ int alloc_strs(char** src, char** dest, int len);
 
 void clean_strs(char** src, char** dest);
 
+void print_packet(const u_char* packet, unsigned begin, unsigned end);
+
 #endif //FIT_IPK_2_IPK_SNIFFER_H

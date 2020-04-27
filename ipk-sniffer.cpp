@@ -178,6 +178,7 @@ int print_interfaces(){
 int sniff(Params &params){
 
     pcap_t* pcap_handle;  //!< packet capture handle
+    char errbuf[PCAP_ERRBUF_SIZE];  //!< chybovy vystup
     bpf_program fp{};
     bpf_u_int32 netmask = 0;
     string s = set_filter_str(params); //"tcp or udp port 80";
@@ -188,7 +189,7 @@ int sniff(Params &params){
     filter[s.size()] = '\0';
 
     //otevreni zarizeni pro zachytavani
-    if((pcap_handle = pcap_open_live(params.interface,BUFSIZ,1,1000, nullptr)) == nullptr){
+    if((pcap_handle = pcap_open_live(params.interface,BUFSIZ,1,1000, errbuf)) == nullptr){
         cerr << "Couldn't open device: " << params.interface << endl;
         return ERR;
     }
@@ -220,6 +221,7 @@ int sniff(Params &params){
 void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packet){
 
     vector<char> hex_dump;  //!< hexadecimalni obsah paketu
+    unsigned header_len = 0;  //!< celkova velikost hlavicky
 
     const tm *p_time = localtime(&header->ts.tv_sec);  //!< cas paketu
     char timestr[16];  //!< cas paketu v retezci
@@ -233,15 +235,16 @@ void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packe
     u_int16_t dport = 0;  //!< cilovy port
     u_int16_t sport = 0;  //!< zdrojovy port
 
-    char* dest;  //!< cilova IP adresa
-    char* src;  //!< zrojova IP adresa
+    char* dest = nullptr;  //!< cilova IP adresa
+    char* src = nullptr;  //!< zrojova IP adresa
 
-    hostent *dest_addr;  //!< cilova adresa
-    hostent *src_addr; //!< zrojova adresa
+    hostent *dest_addr = nullptr;  //!< cilova adresa
+    hostent *src_addr = nullptr; //!< zrojova adresa
 
-    unsigned int ip = 0;  //!< pomocna promenna pro vyhodnoceni domenoveho jmena
+    in_addr_t ip = 0;  //!< pomocna promenna pro vyhodnoceni domenoveho jmena
 
     strftime(timestr, sizeof(timestr),"%H:%M:%S",p_time);
+    printf("%s.%03ld ", timestr, header->ts.tv_usec);
 
     eth_h = (ether_header*) (packet);
 
@@ -251,10 +254,12 @@ void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packe
         alloc_strs(&src,&dest,40);
         inet_ntop(AF_INET6, &ip6_h->ip6_src, src, 40);
         inet_ntop(AF_INET6, &ip6_h->ip6_dst, dest, 40);
-        ip = inet_addr(dest);
-        dest_addr = gethostbyaddr((char*)&ip, 16, AF_INET);
+
         ip = inet_addr(src);
-        src_addr = gethostbyaddr((char*)&ip, 16, AF_INET);
+        src_addr = gethostbyaddr((void*)&ip, 16, AF_INET);
+        if(src_addr == nullptr) cout << src;
+        else cout << src_addr->h_name;
+
 
         if(ip6_h->ip6_ctlun.ip6_un1.ip6_un1_nxt == IPPROTO_TCP){
             tcp_h = (tcphdr*) (packet + ETH_HLEN + 40);
@@ -265,17 +270,16 @@ void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packe
             sport = ntohs(udp_h->uh_sport);
             dport = ntohs(udp_h->uh_dport);
         }
-
-        printf("%s.%03ld ", timestr, header->ts.tv_usec);
-
-        if(src_addr == nullptr) cout << src;
-        else cout << src_addr->h_name;
         cout << " : " << sport << " > ";
+
+        ip = inet_addr(dest);
+        dest_addr = gethostbyaddr((void*)&ip, 16, AF_INET);
         if(dest_addr == nullptr) cout << dest;
         else cout << dest_addr->h_name;
         cout << " : " << dport << endl;
 
         clean_strs(&src,&dest);
+        header_len = tcp_h != nullptr? ETH_HLEN + 40 + tcp_h->doff*4 : ETH_HLEN + ip4_h->ihl*4 + 8;
 
     }else if(ntohs(eth_h->ether_type) == ETHERTYPE_IP){
         ip4_h = (iphdr*) (packet + ETH_HLEN);
@@ -283,10 +287,11 @@ void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packe
         alloc_strs(&src,&dest,16);
         inet_ntop(AF_INET, &ip4_h->saddr, src,16);
         inet_ntop(AF_INET, &ip4_h->daddr, dest,16);
-        ip = inet_addr(dest);
-        dest_addr = gethostbyaddr((char*)&ip, 16, AF_INET);
+
         ip = inet_addr(src);
-        src_addr = gethostbyaddr((char*)&ip, 16, AF_INET);
+        src_addr = gethostbyaddr((void*)&ip, 16, AF_INET);
+        if(src_addr == nullptr) cout << src;
+        else cout << src_addr->h_name;
 
         if(ip4_h->protocol == IPPROTO_TCP){
             tcp_h = (tcphdr*) (packet + ETH_HLEN + ip4_h->ihl*4);
@@ -298,63 +303,22 @@ void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packe
             dport = ntohs(udp_h->uh_dport);
         }
 
-        printf("%s.%03ld ", timestr, header->ts.tv_usec);
 
-        if(src_addr == nullptr) cout << src;
-        else cout << src_addr->h_name;
+        ip = inet_addr(dest);
+        dest_addr = gethostbyaddr((void*)&ip, 16, AF_INET);
+
         cout << " : " << sport << " > ";
+
         if(dest_addr == nullptr) cout << dest;
         else cout << dest_addr->h_name;
         cout << " : " << dport << endl;
 
         clean_strs(&src,&dest);
+        header_len = tcp_h != nullptr? ETH_HLEN + ip4_h->ihl*4 + tcp_h->doff*4 : ETH_HLEN + ip4_h->ihl*4 + 8;
     }
 
-    for(int i = 0, y = 1, w = 0, q = 0, offset = 0; i < header->len; i++,y++, q++) {
-
-        if(q == 0){
-            printf("0x%04x: ",i);
-
-        }
-
-        printf("%02x ",packet[i]);
-        if(y == 8){
-            cout << " ";
-            y = 0;
-        }
-
-        hex_dump.push_back(packet[i]);
-
-        if((i%((offset+1)*15+offset)==0 && i!=0) || i == header->len-1){
-
-            // zarovnani acii znaku do bloku
-            if(i == header->len-1){
-                    // komenzace znaku mezerami
-                    for(int z = i%16; z != 15; z++){
-                        cout << "   "; // za kazdy chybejici znak
-                    }
-                    if(i%16 < 8) cout << " "; // mezera za hexa vypisem
-                    cout << " "; // komepenzace prostedni mezery u hexa vypisu
-            }
-
-            // vypis ascii
-            w = 0;
-            for(char & it : hex_dump){
-                if(w++ == 8){ // mezera mezi ascii
-                    cout << " ";
-                }
-
-                if(isprint(it)) cout << it;
-                else cout << "." ;
-            }
-            q = -1;
-            hex_dump.clear();
-            cout << endl;
-            offset++;
-        }
-    }
-    // konec radku za paketem
-    cout << endl;
+    print_packet(packet, 0, header_len);  // vypis hlavicky
+    print_packet(packet, header_len, header->len);  // vypis dat
 
 }
 
@@ -406,4 +370,65 @@ void clean_strs(char** src, char** dest){
     delete [] *src;
     delete [] *dest;
 
+}
+
+void print_packet(const u_char* packet, unsigned begin, unsigned end){
+
+    vector<char> hex_dump;  //!< hexadecimalni obsah paketu
+
+    /**
+     * @param i poradi zpracovavaneho bytu
+     * @param y nastaveni prostredni mezery v hexa vypisu
+     * @param w nastaveni prostredni mezery v ascci vypisu
+     * @param q vypis poradi 16 bytu (0x000, 0x0010, ...)
+     * @param offset posunuti pocitadla bytu na radku 1.radek: 0-15, 2.radek: 16-31
+     */
+    for(unsigned i = 0, y = 1, w = 0, q = 0, offset = 0; i < end-begin; i++,y++, q++) {
+
+        // vypis poctu bytu
+        if(q == 0){
+            printf("0x%04x: ",(i+begin));
+        }
+        // byte paketu v hexa
+        printf("%02x ",packet[(i+begin)]);
+
+        if(y == 8){
+            cout << " ";
+            y = 0;
+        }
+
+        hex_dump.push_back(packet[(i+begin)]);
+
+        if((i%((offset+1)*15+offset)==0 && i!=0) || i == (end-begin)-1){
+
+            // zarovnani acii znaku do bloku
+            if(i == (end-begin)-1){
+                // kompenzace znaku mezerami
+                for(int z = i%16; z != 15; z++){
+                    cout << "   "; // za kazdy chybejici znak
+                }
+                if(i%16 < 8) cout << " "; // mezera za hexa vypisem
+                cout << " "; // komepenzace prostedni mezery u hexa vypisu
+            }
+
+            // vypis ascii
+            w = 0;
+            for(char & it : hex_dump){
+                if(w++ == 8){ // mezera mezi ascii
+                    cout << " ";
+                }
+
+                if(isprint(it)) cout << it;
+                else cout << "." ;
+            }
+            q = -1;
+            hex_dump.clear();
+            cout << endl;
+            offset++;
+        }
+    }
+
+    // konec radku za paketem
+    if(end-begin != 0)  // pokud bude mit paket prazdne telo, nevypise se mezera
+        cout << endl;
 }
