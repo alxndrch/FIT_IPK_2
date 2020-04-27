@@ -15,7 +15,6 @@
 #include <ifaddrs.h>
 #include <iostream>
 #include <linux/if_ether.h>
-#include <net/if.h>
 #include <netdb.h>
 #include <netinet/if_ether.h>
 #include <netinet/in.h>
@@ -23,15 +22,12 @@
 #include <netinet/ip6.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
+#include <new>
 #include <pcap/pcap.h>
-#include <regex.h>
 #include <string>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <unistd.h>
 #include <vector>
-
-#include <cstring>
 
 #include "ipk-sniffer.h"
 
@@ -386,12 +382,18 @@ string set_filter_str(Params &params){
 
 int alloc_strs(char** src, char** dest, int len){
 
-    if((*src = (char*) malloc(len)) == nullptr){
+    try{
+        *src = new char[len];
+    } catch (const bad_alloc& e) {
         cerr << "chyba pri alokaci zdroju" << endl;
         return ERR;
     }
-    if((*dest = (char*) malloc(len)) == nullptr){
+
+    try{
+        *dest = new char[len];
+    } catch (const bad_alloc& e) {
         cerr << "chyba pri alokaci zdroju" << endl;
+        delete [] *src;
         return ERR;
     }
 
@@ -400,6 +402,8 @@ int alloc_strs(char** src, char** dest, int len){
 }
 
 void clean_strs(char** src, char** dest){
-    free(*src);
-    free(*dest);
+
+    delete [] *src;
+    delete [] *dest;
+
 }
