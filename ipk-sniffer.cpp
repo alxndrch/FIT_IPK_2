@@ -190,7 +190,7 @@ int sniff(Params &params){
 
     //otevreni zarizeni pro zachytavani
     if((pcap_handle = pcap_open_live(params.interface,BUFSIZ,1,1000, errbuf)) == nullptr){
-        cerr << "Couldn't open device: " << params.interface << endl;
+        cout << errbuf << endl;
         return ERR;
     }
 
@@ -392,7 +392,7 @@ void print_packet(const u_char* packet, unsigned begin, unsigned end){
         // byte paketu v hexa
         printf("%02x ",packet[(i+begin)]);
 
-        if(y == 8){
+        if(y == 8 && i != (end-begin-1)){
             cout << " ";
             y = 0;
         }
@@ -401,14 +401,15 @@ void print_packet(const u_char* packet, unsigned begin, unsigned end){
 
         if((i%((offset+1)*15+offset)==0 && i!=0) || i == (end-begin)-1){
 
-            // zarovnani acii znaku do bloku
+            // zarovnani acii znaku do bloku u posledniho radku
             if(i == (end-begin)-1){
                 // kompenzace znaku mezerami
+
+                if(i%16 < 8) cout << " "; // komepenzace prostedni mezery u hexa vypisu
                 for(int z = i%16; z != 15; z++){
                     cout << "   "; // za kazdy chybejici znak
                 }
-                if(i%16 < 8) cout << " "; // mezera za hexa vypisem
-                cout << " "; // komepenzace prostedni mezery u hexa vypisu
+                cout << " "; // mezera za hexa vypisem
             }
 
             // vypis ascii
