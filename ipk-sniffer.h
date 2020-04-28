@@ -13,7 +13,7 @@
 #define ERR -1
 
 /**
- * parametry z priakazove radky
+ * @brief parametry z priakazove radky
  */
 struct Params{
     char* interface;  //!< nazev rozhrani
@@ -22,6 +22,16 @@ struct Params{
     bool tcp; //!< zobrazuje pouze tcp pakety
     bool udp;  //!< zobrazuje pouze udp pakety
 };
+
+/**
+ * @brief vytvoreni retezcu pro zpracovani adres
+ *
+ * @param src retezec pro zdrojovou adresu
+ * @param dest retezec pro cilovou adresu
+ * @param len velikost retezcu
+ * @return ERR v pripade neuspechu pri alokaci, jinak SUCC
+ */
+int alloc_strs(char** src, char** dest, int len);
 
 /**
  * @brief zpracovani argmumentu
@@ -34,13 +44,11 @@ struct Params{
 int arg_process(int argc, char** argv, Params &params);
 
 /**
- * @brief prevod cisla v retezci na ciselnou hodnotu
- *
- * @param str retezec
- * @param num vysledne cislo
- * @return ERR v pripade chyby, jinak SUCC
+ * @brief ulovneni pameti alokovanych retezcu
+ * @param src retezec
+ * @param dest retezec
  */
-int str2int(char* str, int &num);
+void clean_strs(char** src, char** dest);
 
 /**
  * @brief vypis aktivnich sitovych rozhrani
@@ -50,19 +58,19 @@ int str2int(char* str, int &num);
 int print_interfaces();
 
 /**
- * @brief zachytavani paketu
+ * @brief vypis obsahu paketu
  *
- * @param params parametry pro beh
- * @return ERR v pripade chyby, jinak SUCC
+ * @param packet paket
+ * @param begin pocatecni byte paketu
+ * @param end koncovy byte paketu
  */
-int sniff(Params &params);
-
+void print_packet(const u_char* packet, unsigned begin, unsigned end);
 
 /**
  * @brief zpracovani paktu a vypis informaci
  *
- * @param user
- * @param header
+ * @param user nevyuzite! (nullptr)
+ * @param header hlavicka
  * @param packet paket
  */
 void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packet);
@@ -75,10 +83,21 @@ void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packe
  */
 std::string set_filter_str(Params &params);
 
-int alloc_strs(char** src, char** dest, int len);
+/**
+ * @brief prevod cisla v retezci na ciselnou hodnotu
+ *
+ * @param str retezec
+ * @param num vysledne cislo
+ * @return ERR v pripade chyby, jinak SUCC
+ */
+int str2int(char* str, int &num);
 
-void clean_strs(char** src, char** dest);
-
-void print_packet(const u_char* packet, unsigned begin, unsigned end);
+/**
+ * @brief zachytavani paketu
+ *
+ * @param params parametry pro beh
+ * @return ERR v pripade chyby, jinak SUCC
+ */
+int sniff(Params &params);
 
 #endif //FIT_IPK_2_IPK_SNIFFER_H

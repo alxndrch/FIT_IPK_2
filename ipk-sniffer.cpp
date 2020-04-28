@@ -56,6 +56,27 @@ int main(int argc, char** argv){
 
 }
 
+int alloc_strs(char** src, char** dest, int len){
+
+    try{
+        *src = new char[len];
+    } catch (const bad_alloc& e) {
+        cerr << "unsuccessful allocation" << endl;
+        return ERR;
+    }
+
+    try{
+        *dest = new char[len];
+    } catch (const bad_alloc& e) {
+        cerr << "unsuccessful allocation" << endl;
+        delete [] *src;
+        return ERR;
+    }
+
+    return SUCC;
+
+}
+
 int arg_process(int argc, char** argv, Params &params){
 
     int opt = 0;
@@ -100,7 +121,6 @@ int arg_process(int argc, char** argv, Params &params){
                 }
 
                 if(params.num < 1){
-                    // TODO: muze byt nastaveno 0? vypis 0 paketů
                     cerr << "invalid number" << endl;
                     return ERR;
                 }
@@ -125,17 +145,10 @@ int arg_process(int argc, char** argv, Params &params){
 
 }
 
-int str2int(char* str, int &num){
+void clean_strs(char** src, char** dest){
 
-    errno = 0;
-    char* end;
-
-    num = (int)strtol(str, &end, 10);
-
-    if (((errno == ERANGE  || errno == EINVAL || errno != 0) && num == 0) || *end)
-        return ERR;
-
-    return SUCC;
+    delete [] *src;
+    delete [] *dest;
 
 }
 
@@ -175,73 +188,92 @@ int print_interfaces(){
 
 }
 
-int sniff(Params &params){
+void print_packet(const u_char* packet, unsigned begin, unsigned end){
 
-    pcap_t* pcap_handle;  //!< packet capture handle
-    char errbuf[PCAP_ERRBUF_SIZE];  //!< chybovy vystup
-    bpf_program fp{};
-    bpf_u_int32 netmask = 0;
-    string s = set_filter_str(params); //"tcp or udp port 80";
+    vector<char> hex_dump;  // hexadecimalni obsah paketu
 
-    // prevod string na char*
-    char filter[s.size() + 1];
-    s.copy(filter, s.size() + 1);
-    filter[s.size()] = '\0';
+    /*
+     * i citac poradi zpracovavaneho bytu
+     * y citac pro nastaveni prostredni mezery v hexa vypisu
+     * w citac pro nastaveni prostredni mezery v ascci vypisu
+     * q citac pro vypis poradi 16 bytu (0x000, 0x0010, ...)
+     * offset posunuti pocitadla bytu na radku 1.radek: 0-15, 2.radek: 16-31
+     */
+    for(unsigned i = 0, y = 1, w = 0, q = 0, offset = 0; i < end-begin; i++,y++, q++) {
 
-    //otevreni zarizeni pro zachytavani
-    if((pcap_handle = pcap_open_live(params.interface,BUFSIZ,1,1000, errbuf)) == nullptr){
-        cout << errbuf << endl;
-        return ERR;
+        // vypis poctu bytu
+        if(q == 0){
+            printf("0x%04x: ",(i+begin));
+        }
+        // byte paketu v hexa
+        printf("%02x ",packet[(i+begin)]);
+
+        if(y == 8 && i != (end-begin-1)){
+            cout << " ";
+            y = 0;
+        }
+
+        hex_dump.push_back(packet[(i+begin)]);
+
+        if((i%((offset+1)*15+offset)==0 && i!=0) || i == (end-begin)-1){
+
+            // zarovnani acii znaku do bloku u posledniho radku
+            if(i == (end-begin)-1){
+                // kompenzace znaku mezerami
+
+                if(i%16 < 8) cout << " "; // komepenzace prostedni mezery u hexa vypisu
+                for(int z = i%16; z != 15; z++){
+                    cout << "   "; // za kazdy chybejici znak
+                }
+                cout << " "; // mezera za hexa vypisem
+            }
+
+            // vypis ascii
+            w = 0;
+            for(char & it : hex_dump){
+                if(w++ == 8){ // mezera mezi ascii
+                    cout << " ";
+                }
+
+                if(isprint(it)) cout << it;
+                else cout << "." ;
+            }
+            q = -1;
+            hex_dump.clear();
+            cout << endl;
+            offset++;
+        }
     }
 
-    // zpracovani a overeni filteru
-    if(pcap_compile(pcap_handle, &fp, filter, 0, netmask) == PCAP_ERROR){
-        cerr << "Couldn't parse filter: " << filter << endl;
-        return ERR;
-    }
-
-    // nastaveni filteru
-    if(pcap_setfilter(pcap_handle, &fp) == PCAP_ERROR){
-        cerr << "Couldn't set filter: " << filter << endl;
-        return ERR;
-    }
-
-    // zachytavani paketu
-    if(pcap_loop(pcap_handle, params.num, process_packet, nullptr) != 0){
-        cerr << "error occured while sniffing packet" << endl;
-        return ERR;
-    }
-
-    // zavreni zarizeni
-    pcap_close(pcap_handle);
-
-    return SUCC;
+    // konec radku za paketem
+    if(end-begin != 0)  // pokud bude mit paket prazdne telo, nevypise se mezera
+        cout << endl;
 }
 
 void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packet){
 
-    vector<char> hex_dump;  //!< hexadecimalni obsah paketu
-    unsigned header_len = 0;  //!< celkova velikost hlavicky
+    vector<char> hex_dump;  // hexadecimalni obsah paketu
+    unsigned header_len = 0;  // celkova velikost hlavicky
 
-    const tm *p_time = localtime(&header->ts.tv_sec);  //!< cas paketu
-    char timestr[16];  //!< cas paketu v retezci
+    const tm *p_time = localtime(&header->ts.tv_sec);  // cas paketu
+    char timestr[16];  // cas paketu v retezci
 
-    udphdr *udp_h{};  //!< hlavicka UDP
-    tcphdr *tcp_h{};  //!< hlavicka TCP
-    iphdr *ip4_h{};  //!< hlavicka IPv4 datagramu
-    ip6_hdr *ip6_h{};  //!< hlavicka IPv6 datagramu
-    ether_header* eth_h{};  //!< hlavicka ethernetoveho ramce
+    udphdr *udp_h{};  // hlavicka UDP
+    tcphdr *tcp_h{};  // hlavicka TCP
+    iphdr *ip4_h{};  // hlavicka IPv4 datagramu
+    ip6_hdr *ip6_h{};  // hlavicka IPv6 datagramu
+    ether_header* eth_h{};  // hlavicka ethernetoveho ramce
 
-    u_int16_t dport = 0;  //!< cilovy port
-    u_int16_t sport = 0;  //!< zdrojovy port
+    u_int16_t dport = 0;  // cilovy port
+    u_int16_t sport = 0;  // zdrojovy port
 
-    char* dest = nullptr;  //!< cilova IP adresa
-    char* src = nullptr;  //!< zrojova IP adresa
+    char* dest = nullptr;  // cilova IP adresa
+    char* src = nullptr;  // zrojova IP adresa
 
-    hostent *dest_addr = nullptr;  //!< cilova adresa
-    hostent *src_addr = nullptr; //!< zrojova adresa
+    hostent *dest_addr = nullptr;  // cilova adresa
+    hostent *src_addr = nullptr; // zrojova adresa
 
-    in_addr_t ip = 0;  //!< pomocna promenna pro vyhodnoceni domenoveho jmena
+    in_addr_t ip = 0;  // pomocna promenna pro vyhodnoceni domenoveho jmena
 
     strftime(timestr, sizeof(timestr),"%H:%M:%S",p_time);
     printf("%s.%03ld ", timestr, header->ts.tv_usec);
@@ -279,8 +311,9 @@ void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packe
         cout << " : " << dport << endl;
 
         clean_strs(&src,&dest);
-        header_len = tcp_h != nullptr? ETH_HLEN + 40 + tcp_h->doff*4 : ETH_HLEN + ip4_h->ihl*4 + 8;
+        header_len = tcp_h != nullptr? ETH_HLEN + 40 + tcp_h->doff*4 : ETH_HLEN + 40 + 8;
 
+        // IPv4
     }else if(ntohs(eth_h->ether_type) == ETHERTYPE_IP){
         ip4_h = (iphdr*) (packet + ETH_HLEN);
 
@@ -344,92 +377,59 @@ string set_filter_str(Params &params){
 
 }
 
-int alloc_strs(char** src, char** dest, int len){
+int str2int(char* str, int &num){
 
-    try{
-        *src = new char[len];
-    } catch (const bad_alloc& e) {
-        cerr << "chyba pri alokaci zdroju" << endl;
-        return ERR;
-    }
+    errno = 0;
+    char* end;
 
-    try{
-        *dest = new char[len];
-    } catch (const bad_alloc& e) {
-        cerr << "chyba pri alokaci zdroju" << endl;
-        delete [] *src;
+    num = (int)strtol(str, &end, 10);
+
+    if (((errno == ERANGE  || errno == EINVAL || errno != 0) && num == 0) || *end)
         return ERR;
-    }
 
     return SUCC;
 
 }
 
-void clean_strs(char** src, char** dest){
+int sniff(Params &params){
 
-    delete [] *src;
-    delete [] *dest;
+    pcap_t* pcap_handle;  // packet capture handle
+    char errbuf[PCAP_ERRBUF_SIZE];  // chybovy vystup
+    bpf_program fp{};
+    bpf_u_int32 netmask = 0;
+    string s = set_filter_str(params); //"tcp or udp port 80";
 
-}
+    // prevod string na char*
+    char filter[s.size() + 1];
+    s.copy(filter, s.size() + 1);
+    filter[s.size()] = '\0';
 
-void print_packet(const u_char* packet, unsigned begin, unsigned end){
-
-    vector<char> hex_dump;  //!< hexadecimalni obsah paketu
-
-    /**
-     * @param i poradi zpracovavaneho bytu
-     * @param y nastaveni prostredni mezery v hexa vypisu
-     * @param w nastaveni prostredni mezery v ascci vypisu
-     * @param q vypis poradi 16 bytu (0x000, 0x0010, ...)
-     * @param offset posunuti pocitadla bytu na radku 1.radek: 0-15, 2.radek: 16-31
-     */
-    for(unsigned i = 0, y = 1, w = 0, q = 0, offset = 0; i < end-begin; i++,y++, q++) {
-
-        // vypis poctu bytu
-        if(q == 0){
-            printf("0x%04x: ",(i+begin));
-        }
-        // byte paketu v hexa
-        printf("%02x ",packet[(i+begin)]);
-
-        if(y == 8 && i != (end-begin-1)){
-            cout << " ";
-            y = 0;
-        }
-
-        hex_dump.push_back(packet[(i+begin)]);
-
-        if((i%((offset+1)*15+offset)==0 && i!=0) || i == (end-begin)-1){
-
-            // zarovnani acii znaku do bloku u posledniho radku
-            if(i == (end-begin)-1){
-                // kompenzace znaku mezerami
-
-                if(i%16 < 8) cout << " "; // komepenzace prostedni mezery u hexa vypisu
-                for(int z = i%16; z != 15; z++){
-                    cout << "   "; // za kazdy chybejici znak
-                }
-                cout << " "; // mezera za hexa vypisem
-            }
-
-            // vypis ascii
-            w = 0;
-            for(char & it : hex_dump){
-                if(w++ == 8){ // mezera mezi ascii
-                    cout << " ";
-                }
-
-                if(isprint(it)) cout << it;
-                else cout << "." ;
-            }
-            q = -1;
-            hex_dump.clear();
-            cout << endl;
-            offset++;
-        }
+    //otevreni zarizeni pro zachytavani
+    if((pcap_handle = pcap_open_live(params.interface,BUFSIZ,1,1000, errbuf)) == nullptr){
+        cout << errbuf << endl;
+        return ERR;
     }
 
-    // konec radku za paketem
-    if(end-begin != 0)  // pokud bude mit paket prazdne telo, nevypise se mezera
-        cout << endl;
+    // zpracovani a overeni filteru
+    if(pcap_compile(pcap_handle, &fp, filter, 0, netmask) == PCAP_ERROR){
+        cerr << "Couldn't parse filter: " << filter << endl;
+        return ERR;
+    }
+
+    // nastaveni filteru
+    if(pcap_setfilter(pcap_handle, &fp) == PCAP_ERROR){
+        cerr << "Couldn't set filter: " << filter << endl;
+        return ERR;
+    }
+
+    // zachytavani paketu
+    if(pcap_loop(pcap_handle, params.num, process_packet, nullptr) != 0){
+        cerr << "error occured while sniffing packet" << endl;
+        return ERR;
+    }
+
+    // zavreni zarizeni
+    pcap_close(pcap_handle);
+
+    return SUCC;
 }
