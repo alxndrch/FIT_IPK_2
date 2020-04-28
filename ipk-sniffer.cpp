@@ -406,7 +406,7 @@ int sniff(Params &params){
 
     //otevreni zarizeni pro zachytavani
     if((pcap_handle = pcap_open_live(params.interface,BUFSIZ,1,1000, errbuf)) == nullptr){
-        cout << errbuf << endl;
+        cerr << errbuf << endl;
         return ERR;
     }
 
