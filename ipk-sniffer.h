@@ -11,6 +11,9 @@
 
 #define SUCC 0
 #define ERR -1
+#define PORT_MAX 65535  //!< maximalni hodnota portu (USHRT_MAX)
+#define IPV6_HLEN 40  //!< velikost IPv6 hlavicky v B
+#define UDP_HLEN 8  //!< velikost UDP hlavicky
 
 /**
  * @brief parametry z priakazove radky
@@ -21,6 +24,7 @@ struct Params{
     int num;  //!< pocet vypisovanych paketu
     bool tcp; //!< zobrazuje pouze tcp pakety
     bool udp;  //!< zobrazuje pouze udp pakety
+    bool help; //!< napoveda
 };
 
 /**

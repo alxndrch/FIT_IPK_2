@@ -35,11 +35,20 @@ using namespace std;
 
 int main(int argc, char** argv){
 
-    Params par = {.interface = nullptr, .port = -1, .num = 1, .tcp = false, .udp = false};
+    Params par = {.interface = nullptr, .port = -1, .num = 0, .tcp = false, .udp = false, .help = false};
 
     // zpracovani argumentu
     if(arg_process(argc, argv, par) == ERR)
         return EXIT_FAILURE;
+
+    // ukonceni po vypsani napovedy
+    if(par.help)
+        return EXIT_SUCCESS;
+
+
+    // 0 kvuli testovani spravnosti argumemtu na prikazove radce
+    if(par.num == 0)  // parametr nebyl nastaven
+        par.num = 1;  // nastavi se implicitne na 1, pro vypis 1 paketu
 
     // vypis aktivnich rozhrani
     if(par.interface == nullptr){
@@ -84,37 +93,59 @@ int arg_process(int argc, char** argv, Params &params){
     struct option long_opt[] = {
         {"tcp",no_argument, nullptr,'t'},
         {"udp",no_argument, nullptr,'u'},
+        {"help",no_argument, nullptr,'h'},
         {0,0,0,0}
     };
 
     while(1){
 
-        if((opt = getopt_long(argc,argv, ":i:p:tun:", long_opt, nullptr)) == -1)
+        if((opt = getopt_long(argc,argv, ":i:p:thun:", long_opt, nullptr)) == -1)
             break;
 
         switch(opt){
             case 'i':
+                if(params.interface != nullptr){
+                    cerr << "invalid combination of command parameters" << endl;
+                    return ERR;
+                }
                 params.interface = optarg;
                 break;
             case 'p':
+                if(params.port != -1){
+                    cerr << "invalid combination of command parameters" << endl;
+                    return ERR;
+                }
                 if(str2int(optarg, params.port) == ERR){
                     cerr << "invalid port" << endl;
                     return ERR;
                 }
 
-                if(params.port < 0){
+                if(params.port < 0 || params.port > PORT_MAX){
                     cerr << "invalid port" << endl;
                     return ERR;
                 }
 
                 break;
             case 't':
+                if(params.tcp){
+                    cerr << "invalid combination of command parameters" << endl;
+                    return ERR;
+                }
                 params.tcp = true;
                 break;
             case 'u':
+                if(params.udp){
+                    cerr << "invalid combination of command parameters" << endl;
+                    return ERR;
+                }
                 params.udp = true;
                 break;
             case 'n':
+                if(params.num != 0){
+                    cerr << "invalid combination of command parameters" << endl;
+                    return ERR;
+                }
+
                 if(str2int(optarg, params.num) == ERR){
                     cerr << "invalid number" << endl;
                     return ERR;
@@ -125,6 +156,20 @@ int arg_process(int argc, char** argv, Params &params){
                     return ERR;
                 }
 
+                break;
+            case 'h':
+                if(argc > 2){
+                    cerr << "invalid combination of command parameters" << endl;
+                    return ERR;
+                }
+                params.help = true;
+                cout << "sudo ./ipk-sniffer -i interface [--help|-h] [-p port] [--tcp|-t] [--udp|-u] [-n num]" << endl;
+                cout << "--help|-h      help"<< endl;
+                cout << "-i interace    active network interface for sniffing" << endl;
+                cout << "-p port        port is number between 1 and 65535" << endl;
+                cout << "--tcp|-t       sniff only tcp protocol" << endl;
+                cout << "--udt|-t       sniff only ud protocol" << endl;
+                cout << "-n number      number of packets, (number > 1)" << endl;
                 break;
             case '?':
                 cerr << "invalid argument" << endl;
@@ -294,11 +339,11 @@ void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packe
 
 
         if(ip6_h->ip6_ctlun.ip6_un1.ip6_un1_nxt == IPPROTO_TCP){
-            tcp_h = (tcphdr*) (packet + ETH_HLEN + 40);
+            tcp_h = (tcphdr*) (packet + ETH_HLEN + IPV6_HLEN);
             sport = ntohs(tcp_h->th_sport);
             dport = ntohs(tcp_h->th_dport);
         }else if(ip6_h->ip6_ctlun.ip6_un1.ip6_un1_nxt == IPPROTO_UDP){
-            udp_h = (udphdr*) (packet + ETH_HLEN + 40);
+            udp_h = (udphdr*) (packet + ETH_HLEN + IPV6_HLEN);
             sport = ntohs(udp_h->uh_sport);
             dport = ntohs(udp_h->uh_dport);
         }
@@ -311,7 +356,7 @@ void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packe
         cout << " : " << dport << endl;
 
         clean_strs(&src,&dest);
-        header_len = tcp_h != nullptr? ETH_HLEN + 40 + tcp_h->doff*4 : ETH_HLEN + 40 + 8;
+        header_len = tcp_h != nullptr? ETH_HLEN + IPV6_HLEN + tcp_h->doff*4 : ETH_HLEN + IPV6_HLEN + UDP_HLEN;
 
         // IPv4
     }else if(ntohs(eth_h->ether_type) == ETHERTYPE_IP){
@@ -347,7 +392,7 @@ void process_packet(u_char* user, const pcap_pkthdr* header, const u_char* packe
         cout << " : " << dport << endl;
 
         clean_strs(&src,&dest);
-        header_len = tcp_h != nullptr? ETH_HLEN + ip4_h->ihl*4 + tcp_h->doff*4 : ETH_HLEN + ip4_h->ihl*4 + 8;
+        header_len = tcp_h != nullptr? ETH_HLEN + ip4_h->ihl*4 + tcp_h->doff*4 : ETH_HLEN + ip4_h->ihl*4 + UDP_HLEN;
     }
 
     print_packet(packet, 0, header_len);  // vypis hlavicky
@@ -392,6 +437,15 @@ int str2int(char* str, int &num){
 }
 
 int sniff(Params &params){
+
+    /***************************************************************************************
+     *    Inspirováno z:
+     *    Title: Programming with pcap
+     *    Author: Tim Carstens
+     *    Date: 2020
+     *    Availability: https://www.tcpdump.org/pcap.html
+     *
+    ***************************************************************************************/
 
     pcap_t* pcap_handle;  // packet capture handle
     char errbuf[PCAP_ERRBUF_SIZE];  // chybovy vystup
