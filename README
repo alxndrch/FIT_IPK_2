@@ -1,0 +1,15 @@
+Sniffer paketů
+Implementován v jazyce C++, použitá knihovna libpcap
+
+Seznam odevzdaných souboru: 
+	ipk-sniffer.cpp
+	ipk-sniffer.h
+	Makefile
+	manual.pdf
+	README
+
+Přeložení programu:
+	$ make 
+
+Spuštění projektu: 
+	$ sudo ./ipk-sniffer -i interface [--help|-h] [-p port] [--tcp|-t] [--udp|-u] [-n num]
